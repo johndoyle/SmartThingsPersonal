@@ -1,5 +1,5 @@
 /**
- *  Copyright 2017 johndoyle
+ *  Copyright 2015 johndoyle
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -22,7 +22,7 @@ metadata {
         capability "Switch"
         capability "Temperature Measurement"
 
-		fingerprint profileId: "0104", inClusters: "0000, 0002, 0006"
+		fingerprint profileId: "0104", inClusters: "0000, 0002, 0006, 0008"
 	}
 
     // simulator metadata
@@ -37,8 +37,9 @@ metadata {
     }
 	
     preferences {
-		input title: "Temperature Offset", description: "This feature allows you to correct any temperature variations by selecting an offset. Ex: If your sensor consistently reports a temp that's 2 degrees too warm, you'd enter \"-2\". If 3 degrees too cold, enter \"+3\".", displayDuringSetup: false, type: "paragraph", element: "paragraph"
+		input title: "Temperature Offset", description: "Use to correct any temperature variations by selecting an offset.", displayDuringSetup: false, type: "paragraph", element: "paragraph"
 		input "tempOffset", "number", title: "Degrees", description: "Adjust temperature by this many degrees", range: "*..*", displayDuringSetup: false
+		input title: "Padding", description: "Use to allow the temp to be seen on the config page when the keyboard is up on iPhone", displayDuringSetup: false, type: "paragraph", element: "paragraph"
 	}
 
  // UI tile definitions
@@ -68,13 +69,19 @@ metadata {
         valueTile("temperature", "device.temperature", width: 2, height: 2) {
 			state("temperature", label:'${currentValue}°', unit:"C",
 				backgroundColors:[
-					[value: 12, color: "#153591"],
-					[value: 15, color: "#1e9cbb"],
-					[value: 18, color: "#90d2a7"],
-					[value: 20, color: "#44b621"],
-					[value: 22, color: "#f1d801"],
-					[value: 24, color: "#d04e00"],
-					[value: 26, color: "#bc2323"]
+					[value: 0, color: "#153591"],
+					[value: 5, color: "#1e9cbb"],
+					[value: 10, color: "#90d2a7"],
+					[value: 15, color: "#44b621"],
+					[value: 20, color: "#f1d801"],
+					[value: 25, color: "#d04e00"],
+					[value: 30, color: "#bc2323"],
+					[value: 44, color: "#1e9cbb"],
+					[value: 59, color: "#90d2a7"],
+					[value: 74, color: "#44b621"],
+					[value: 84, color: "#f1d801"],
+					[value: 95, color: "#d04e00"],
+					[value: 96, color: "#bc2323"]  
 				]
 			)
 		}
