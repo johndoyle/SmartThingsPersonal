@@ -35,14 +35,19 @@ metadata {
     }
 	
     preferences {
-		input title: "Temperature Offset", description: "Use to correct any temperature variations by selecting an offset.", displayDuringSetup: false, type: "paragraph", element: "paragraph"
-		input "tempOffset", "number", title: "Degrees", description: "Adjust temperature by this many degrees", range: "*..*", displayDuringSetup: false
-		input title: "Padding", description: "Used to allow the temp to be seen on the config page when the keyboard is up on iPhone", displayDuringSetup: false, type: "paragraph", element: "paragraph"
+        input "tempOffset", "number", title: "Temperature Offset", description: "Adjust temperature in degrees",
+              range: "*..*", displayDuringSetup: false
+		input title: "", description: "Use to correct any temperature variations by selecting an offset.", displayDuringSetup: false, type: "paragraph", element: "paragraph"
+		input "debugOutput", "boolean", 
+			title: "Enable debug logging?",
+            description: "Use to display messages in Live Logging.",
+			defaultValue: false,
+			displayDuringSetup: true
 	}
 
  // UI tile definitions
     tiles(scale: 2) {
-        multiAttributeTile(name:"rich-control", type: "switch", canChangeIcon: true){
+        multiAttributeTile(name:"rich-control", type: "switch", canChangeIcon: false){
             tileAttribute ("device.switch", key: "PRIMARY_CONTROL") {
                  attributeState "on", label:'${name}', action:"switch.off", icon:"st.Home.home30", backgroundColor:"#00A0DC", nextState:"turningOff"
                  attributeState "off", label:'${name}', action:"switch.on", icon:"st.Home.home30", backgroundColor:"#ffffff", nextState:"turningOn"
@@ -52,7 +57,7 @@ metadata {
  			}
         }
 
-        standardTile("switch", "device.switch", width: 2, height: 2, canChangeIcon: true) {
+        standardTile("switch", "device.switch", width: 2, height: 2, canChangeIcon: false) {
             state "on", label:'${name}', action:"switch.off", icon:"st.Home.home30", backgroundColor:"#00A0DC", nextState:"turningOff"
             state "off", label:'${name}', action:"switch.on", icon:"st.Home.home30", backgroundColor:"#ffffff", nextState:"turningOn"
             state "turningOn", label:'${name}', action:"switch.off", icon:"st.Home.home30", backgroundColor:"#00A0DC", nextState:"turningOff"
@@ -122,7 +127,7 @@ private Map parseCatchAllMessage(String description) {
             resultMap = createEvent(name: "switch", value: "off")
     }
     else if (cluster.clusterId == 0x0000 && cluster.command == 0x0a){
-    	log.info "Periodic Update"
+    	if (state.debug) log.info "Periodic Update"
     }
 	return resultMap
 }
@@ -139,11 +144,11 @@ private Map parseReportAttributeMessage(String description) {
         if (tempOffset) {
 			temp = (int) temp + (int) tempOffset
 		}
-    	log.info "Reported Temp of " + temp + "°" + getTemperatureScale()
+    	if (state.debug) log.info "Reported Temp of " + temp + "°" + getTemperatureScale()
 		resultMap = createEvent(name: "temperature", value: zigbee.parseHATemperatureValue("temperature: " + temp, "temperature: ", getTemperatureScale()), unit: getTemperatureScale())
 	}
     else if (descMap.cluster == "0008" && descMap.attrId == "0000") {
-    	log.info "Reported Switch Off"
+    	if (state.debug) log.info "Reported Switch Off"
     	resultMap = createEvent(name: "switch", value: "off")
     } 
 	return resultMap
@@ -167,13 +172,13 @@ private isDuplicateCommand(lastExecuted, allowedMil) {
 
 def off() {
 	if (device.endpointId == null) device.endpointId = 2
-   	log.info "Off()"
+   	if (state.debug) log.info "Off()"
     zigbee.off()
 }
 
 def on() {
 	if (device.endpointId == null) device.endpointId = 2
-   	log.info "On()"
+   	if (state.debug) log.info "On()"
     zigbee.on()
 }
 
@@ -181,7 +186,7 @@ def on() {
  * PING is used by Device-Watch in attempt to reach the Device
  * */
 def ping() {
-   	log.info "ping()"
+   	if (state.debug) log.info "ping()"
 	if (device.endpointId == null) device.endpointId = 2
     return zigbee.readAttribute(0x0006, 0x0000) +
         zigbee.readAttribute(0x0008, 0x0000) +
@@ -190,7 +195,7 @@ def ping() {
 }
 
 def push() {
-   	log.info "push()"
+   	if (state.debug) log.info "push()"
 	if (device.endpointId == null) device.endpointId = 2
 	sendEvent(name: "switch", value: "on", isStateChange: true, displayed: false)
 	sendEvent(name: "switch", value: "off", isStateChange: true, displayed: false)
@@ -198,7 +203,8 @@ def push() {
 }
 
 def refresh() {
-	log.info "Refresh..."
+	state.debug = ("true" == debugOutput)
+	if (state.debug) log.info "Refresh..."
     [
         "st rattr 0x${device.deviceNetworkId} 0x01 0x0002 0x0000", "delay 250", // CurrentTemperature
 		"st rattr 0x${device.deviceNetworkId} 0x02 0x0006 0x0000", "delay 500", // On/Off
@@ -233,7 +239,7 @@ def refresh() {
 }
 
 def configure() {
-    log.info "Configuring Reporting and Bindings."
+    if (state.debug) log.info "Configuring Reporting and Bindings."
 	if (device.endpointId == null) device.endpointId = 2
     return zigbee.configureReporting(0x0006, 0x0000, 0x10, 0, 600, null) +
         zigbee.configureReporting(0x0008, 0x0000, 0x20, 1, 3600, 0x01) +
