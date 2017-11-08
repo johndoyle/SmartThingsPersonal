@@ -1,5 +1,5 @@
 /**
- *  Copyright 2015 johndoyle
+ *  Copyright 2017 johndoyle
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -9,8 +9,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *  18/01/2017 corrected the temperature reading a4refillpad
  */
 
 metadata {
@@ -22,7 +20,7 @@ metadata {
         capability "Switch"
         capability "Temperature Measurement"
 
-		fingerprint profileId: "0104", inClusters: "0000, 0002, 0006, 0008"
+		fingerprint profileId: "0104", inClusters: "0000, 0002, 0006"
 	}
 
     // simulator metadata
@@ -39,7 +37,7 @@ metadata {
     preferences {
 		input title: "Temperature Offset", description: "Use to correct any temperature variations by selecting an offset.", displayDuringSetup: false, type: "paragraph", element: "paragraph"
 		input "tempOffset", "number", title: "Degrees", description: "Adjust temperature by this many degrees", range: "*..*", displayDuringSetup: false
-		input title: "Padding", description: "Use to allow the temp to be seen on the config page when the keyboard is up on iPhone", displayDuringSetup: false, type: "paragraph", element: "paragraph"
+		input title: "Padding", description: "Used to allow the temp to be seen on the config page when the keyboard is up on iPhone", displayDuringSetup: false, type: "paragraph", element: "paragraph"
 	}
 
  // UI tile definitions
@@ -183,7 +181,6 @@ def on() {
  * PING is used by Device-Watch in attempt to reach the Device
  * */
 def ping() {
-	if (device.endpointId == null) device.endpointId = 2
    	log.info "ping()"
 	if (device.endpointId == null) device.endpointId = 2
     return zigbee.readAttribute(0x0006, 0x0000) +
@@ -211,6 +208,7 @@ def refresh() {
     ]
 /**
  * 	Capability Returns
+ *	 if (device.endpointId == null) device.endpointId = 2
  *   [
  *     	"st rattr 0x${device.deviceNetworkId} 0x${device.endpointId} 0x0000 0x0000", "delay 250", // ZCLVersion
  *		"st rattr 0x${device.deviceNetworkId} 0x${device.endpointId} 0x0000 0x0001", "delay 250", // ApplicationVersion
