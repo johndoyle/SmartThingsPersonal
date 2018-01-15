@@ -25,6 +25,7 @@
  * added experimental health check as worked out by rolled54.Why
  * Added capability of "Illuminance Measurement"
  * Messed with layout 
+ * Added Better Battery reporting
  *
  */
 
@@ -42,8 +43,24 @@ metadata {
         attribute "lastMotion", "String"
         attribute "Light", "number"
 
+        fingerprint profileId: "0104", deviceId: "0104", inClusters: "0000,FFFF,0406,0400", outClusters: "0000,0019", manufacturer: "LUMI", model: "lumi.sensor_motion.aq2", deviceJoinName: "Xiaomi Aqara Motion Sensor"
+		
+        fingerprint endpointId: "01", profileId: "0104", deviceId: "0107", inClusters: "0000,FFFF,0406,0400,0500,0001,0003", outClusters: "0000,0019", manufacturer: "LUMI", model: "lumi.sensor_motion.aq2", deviceJoinName: "Xiaomi Aqara Motion Sensor"
     	fingerprint profileId: "0104", deviceId: "0104", inClusters: "0000, 0003, FFFF, 0019", outClusters: "0000, 0004, 0003, 0006, 0008, 0005, 0019", manufacturer: "LUMI", model: "lumi.sensor_motion", deviceJoinName: "Xiaomi Motion"
-        
+    	fingerprint profileId: "0104", inClusters: "0000, FFFF, 0406, 0400", outClusters: "0000, 0019", manufacturer: "LUMI", model: "lumi.sensor_motion.aq2", deviceJoinName: "Xiaomi Aqara Motion Sensor"
+
+//		"deviceId": "db643ba2-21ad-4673-883f-e8c8295cb29b" -> 00158D00016569FA
+//		Raw Description 01 0104 0104 01 04 0000 FFFF 0406 0400 02 0000 0019
+//		0000 - Basic reporting
+//		FFFF
+//		0406 - Occupancy Sensing
+//		0400 - Illuminance Measurement
+//		02 - id
+//		0000  - Basic reporting
+//		0019
+//zbjoin: {"dni":"A8C6","d":"00158D00016569FA","capabilities":"80","endpoints":[{"simple":"01 0104 0104 01 04 0000 FFFF 0406 0400 02 0000 0019","application":"03","manufacturer":"LUMI","model":"lumi.sensor_motion.aq2"}],"parent":"005E","joinType":1}
+//zbjoin: {"dni":"3C99","d":"00158D00016569FA","capabilities":"80","endpoints":[{"simple":"01 0104 0104 01 04 0000 FFFF 0406 0400 02 0000 0019","application":"03","manufacturer":"LUMI","model":"lumi.sensor_motion.aq2"}],"parent":"0000","joinType":1}
+
         command "reset"
         command "Refresh"
         
@@ -107,17 +124,24 @@ metadata {
 		standardTile("reset", "device.reset", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
 			state "default", action:"reset", label: "Reset Motion", icon: "st.motion.motion.active"
 		}
-		valueTile("battery", "device.battery", decoration: "flat", inactiveLabel: false, width: 2, height: 2) {
-			state "battery", label:'${currentValue}% battery', unit:""
-		}
-              
+        valueTile("battery", "device.battery", decoration: "flat", inactiveLabel: false, width: 2, height: 2) {
+			state "battery", label:'${currentValue}% battery', unit:"",
+			backgroundColors:[
+				[value: 0,  color: "#c0392b"],
+				[value: 25, color: "#f1c40f"],
+				[value: 50, color: "#e67e22"],
+				[value: 75, color: "#27ae60"]
+			]
+        }     
         valueTile("lastmotion", "device.lastMotion", decoration: "flat", inactiveLabel: false, width: 2, height: 2) {
 			state "default", label:'${currentValue}', icon:"st.Entertainment.entertainment15"
         }
         standardTile("refresh", "command.refresh", inactiveLabel: false) {
 			state "default", label:'refresh', action:"refresh.refresh", icon:"st.secondary.refresh-icon"
-	   }
-
+	    }
+		standardTile("batteryRuntime", "device.batteryRuntime", inactiveLabel: false, decoration: "flat", width: 6, height: 2) {
+			state "batteryRuntime", label:'Battery Changed: ${currentValue} - Tap To Reset Date', unit:"", action:"resetBatteryRuntime"
+		}
 		main(["motion"])
 		details(["main", "lastmotion", "motion", "battery",  "refresh", "reset", "configure"])
 	}
@@ -126,7 +150,7 @@ metadata {
 // Parse incoming device messages to generate events
 def parse(String description) {
 	def value = zigbee.parse(description)?.text
-	if (state.debug) log.debug "Parsing: '${description}'"
+	if (state.debug) log.debug "${device.displayName} Parsing: '${description}'"
 	Map map = [:]
    
 	if (description?.startsWith('catchall:')) {
@@ -145,7 +169,7 @@ def parse(String description) {
     
     if (description?.startsWith('enroll request')) {
     	List cmds = enrollResponse()
-        if (state.debug) log.debug "${linkText} enroll response: ${cmds}"
+        if (state.debug) log.debug "${device.displayName} enroll response: ${cmds}"
         result = cmds?.collect { new physicalgraph.device.HubAction(it) }
     }
 
@@ -155,54 +179,70 @@ def parse(String description) {
 
 private Map parseIlluminanceMessage(String description)
 {
-	def linkText = getLinkText(device)
 	def result = [
 		name: 'illuminance',
 		value: '--'
 	]
 	def value = ((description - "illuminance: ").trim()) as Float
 	result.value = value
-	result.descriptionText = "${linkText} ${result.name} was ${result.value}"
+	result.descriptionText = "${device.displayName} ${result.name} was ${result.value}"
 	return result;
 }
 
 
 private Map getBatteryResult(rawValue) {
 	if (state.debug) log.debug 'Battery'
-	def linkText = getLinkText(device)
 	if (state.debug) log.debug rawValue
 	def result = [
 		name: 'battery',
-		value: '--'
+		value: '--',
+        unit: "%",
+        translatable: true
 	]
-	def volts = rawValue / 1
-    def maxVolts = 100
-	if (volts > maxVolts) {
-		volts = maxVolts
-    }
-    result.value = volts
-	result.descriptionText = "${linkText} battery was ${result.value}%"
+	def rawVolts = rawValue / 1000
+    def maxBattery = state.maxBattery ?: 0
+    def minBattery = state.minBattery ?: 0
+	
+    if (maxBattery == 0 || rawVolts > minBattery)
+        state.maxBattery = maxBattery = rawVolts
+
+    if (minBattery == 0 || rawVolts < minBattery)
+        state.minBattery = minBattery = rawVolts
+
+    def volts = (maxBattery + minBattery) / 2
+    def minVolts = 2.7
+    def maxVolts = 3.0
+    def pct = (volts - minVolts) / (maxVolts - minVolts)
+    def roundedPct = Math.round(pct * 100)
+    result.value = Math.min(100, roundedPct)
+    result.descriptionText = "${device.displayName}: raw battery is ${rawVolts}v, state: ${volts}v, ${minBattery}v - ${maxBattery}v"
 	return result
 }
 
 private Map parseCatchAllMessage(String description) {
-    def linkText = getLinkText(device)
-    
 	Map resultMap = [:]
 	def cluster = zigbee.parse(description)
+    def i
 	if (state.debug) log.debug cluster
 	if (shouldProcessMessage(cluster)) {
-		switch(cluster.clusterId) {
-			case 0x0000:
-			resultMap = getBatteryResult(cluster.data.get(30))
-			break
-
+        switch(cluster.clusterId) {
+            case 0x0000:
+            	def MsgLength = cluster.data.size();
+                for (i = 0; i < (MsgLength-3); i++)
+                {
+                    if ((cluster.data.get(i) == 0x01) && (cluster.data.get(i+1) == 0x21))  // check the data ID and data type
+                    {
+                        // next two bytes are the battery voltage.
+                        resultMap = getBatteryResult((cluster.data.get(i+3)<<8) + cluster.data.get(i+2))
+                    }
+                }
+            	break
 			case 0xFC02:
-			if (state.debug) log.debug '${linkText}: ACCELERATION'
+			if (state.debug) log.debug '${device.displayName}: ACCELERATION'
 			break
 
 			case 0x0402:
-			if (state.debug) log.debug '${linkText}: TEMP'
+			if (state.debug) log.debug '${device.displayName}: TEMP'
 				// temp is last 2 data values. reverse to swap endian
 				String temp = cluster.data[-2..-1].reverse().collect { cluster.hex1(it) }.join()
 				def value = getTemperature(temp)
@@ -225,50 +265,23 @@ private boolean shouldProcessMessage(cluster) {
 
 
 def configure() {
-	def linkText = getLinkText(device)
-	String zigbeeEui = swapEndianHex(device.hub.zigbeeEui)
-	if (state.debug) log.debug "${linkText}: ${device.deviceNetworkId}"
-    def endpointId = 1
-    if (state.debug) log.debug "${linkText}: ${device.zigbeeId}"
-    if (state.debug) log.debug "${linkText}: ${zigbeeEui}"
-	def configCmds = [
-			//battery reporting and heartbeat
-			"zdo bind 0x${device.deviceNetworkId} 1 ${endpointId} 1 {${device.zigbeeId}} {}", "delay 200",
-			"zcl global send-me-a-report 1 0x20 0x20 600 3600 {01}", "delay 200",
-			"send 0x${device.deviceNetworkId} 1 ${endpointId}", "delay 1500",
-
-			// Writes CIE attribute on end device to direct reports to the hub's EUID
-			"zcl global write 0x500 0x10 0xf0 {${zigbeeEui}}", "delay 200",
-			"send 0x${device.deviceNetworkId} 1 1", "delay 500",
-	]
-
-	if (state.debug) log.debug "${linkText} configure: Write IAS CIE"
-	return configCmds
-}
-
-def enrollResponse() {
-    def linkText = getLinkText(device)
-	if (device.endpointId == null) device.endpointId = 0x01
-    log.debug "${linkText}: Enrolling device into the IAS Zone"
-	[
-			// Enrolling device into the IAS Zone
-			"raw 0x500 {01 23 00 00 00}", "delay 200",
-			"send 0x${device.deviceNetworkId} 1 1"
-	]
+	state.battery = 0
+    if (state.debug) log.debug "${device.displayName}: configuring"
+    return zigbee.readAttribute(0x0001, 0x0020) + zigbee.configureReporting(0x0001, 0x0020, 0x21, 600, 21600, 0x01)
 }
 
 def refresh() {
-	def linkText = getLinkText(device)
-	state.debug = ("true" == debugOutput)
-    if (state.debug) log.debug "${linkText}: Refreshing Battery"
-//    def endpointId = 0x01
-//	[
-//	    "st rattr 0x${device.deviceNetworkId} ${endpointId} 0x0000 0x0000", "delay 200"
-//	    "st rattr 0x${device.deviceNetworkId} ${endpointId} 0x0000", "delay 200"
-//	] //+ enrollResponse()
+    if (state.debug) log.debug "${device.displayName}: refreshing"
+    return zigbee.readAttribute(0x0001, 0x0020) 
+}
 
-	if (device.endpointId == null) device.endpointId = 0x01
-    zigbee.configureReporting(0x0001, 0x0021, 0x20, 300, 600, 0x01)
+def enrollResponse() {
+    if (state.debug) log.debug "${device.displayName}: Enrolling device into the IAS Zone"
+    [
+        // Enrolling device into the IAS Zone
+        "raw 0x500 {01 23 00 00 00}", "delay 200",
+        "send 0x${device.deviceNetworkId} 1 1"
+    ]
 }
 
 private Map parseReportAttributeMessage(String description) {
@@ -276,8 +289,7 @@ private Map parseReportAttributeMessage(String description) {
 		def nameAndValue = param.split(":")
 		map += [(nameAndValue[0].trim()):nameAndValue[1].trim()]
 	}
-	//log.debug "Desc Map: $descMap"
- 
+
 	Map resultMap = [:]
     def now = new Date().format("H:mm", location.timeZone)
    
@@ -300,7 +312,6 @@ private Map parseCustomMessage(String description) {
 }
 
 private Map parseIasMessage(String description) {
-    def linkText = getLinkText(device)
     List parsedMsg = description.split(' ')
     String msgCode = parsedMsg[2]
     
@@ -315,7 +326,7 @@ private Map parseIasMessage(String description) {
             break
 
         case '0x0022': // Tamper Alarm
-        	log.debug '${linkText}: motion with tamper alarm'
+        	if (state.debug) log.debug '${device.displayName}: motion with tamper alarm'
         	resultMap = getMotionResult('active')
             break
 
@@ -323,7 +334,7 @@ private Map parseIasMessage(String description) {
             break
 
         case '0x0024': // Supervision Report
-        	log.debug '${linkText}: no motion with tamper alarm'
+        	if (state.debug) log.debug '${device.displayName}: no motion with tamper alarm'
         	resultMap = getMotionResult('inactive')
             break
 
@@ -331,7 +342,7 @@ private Map parseIasMessage(String description) {
             break
 
         case '0x0026': // Trouble/Failure
-        	log.debug '${linkText}: motion with failure alarm'
+        	if (state.debug) log.debug '${device.displayName}: motion with failure alarm'
         	resultMap = getMotionResult('active')
             break
 
@@ -343,9 +354,7 @@ private Map parseIasMessage(String description) {
 
 
 private Map getMotionResult(value) {
-	def linkText = getLinkText(device)
-    //log.debug "${linkText}: motion"
-	String descriptionText = value == 'active' ? "${linkText} detected motion" : "${linkText} motion has stopped"
+	String descriptionText = value == 'active' ? "${device.displayName} detected motion" : "${device.displayName} motion has stopped"
 	def commands = [
 		name: 'motion',
 		value: value,
@@ -372,15 +381,20 @@ def stopMotion() {
 def reset() {
 	sendEvent(name:"motion", value:"inactive")
 }
-def installed() {
-	// Device wakes up every 1 hour, this interval allows us to miss one wakeup notification before marking offline
-	def linkText = getLinkText(device)
-    if (state.debug) log.debug "${linkText}: Configured health checkInterval when installed()"
-	sendEvent(name: "checkInterval", value: 2 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID])
+def resetBatteryRuntime() {
+   	def now = new Date().format("yyyy-MM-dd H:mm:ss", location.timeZone)
+    sendEvent(name: "batteryRuntime", value: now)
 }
+def installed() {
+    checkIntervalEvent("installed");
+}
+
 def updated() {
-	// Device wakes up every 1 hours, this interval allows us to miss one wakeup notification before marking offline
-	def linkText = getLinkText(device)
-    if (state.debug) log.debug "${linkText}: Configured health checkInterval when updated()"
-	sendEvent(name: "checkInterval", value: 2 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID])
+    checkIntervalEvent("updated");
+}
+
+private checkIntervalEvent(text) {
+    // Device wakes up every 1 hours, this interval allows us to miss one wakeup notification before marking offline
+    if (state.debug) log.debug "${device.displayName}: Configured health checkInterval when ${text}()"
+    sendEvent(name: "checkInterval", value: 2 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID])
 }
