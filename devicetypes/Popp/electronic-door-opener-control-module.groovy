@@ -21,8 +21,6 @@ metadata {
 
 		command "unlockwtimeout"
 
-		attribute "lastCheckin", "string"
-        
        /**
         * zw:Ls type:4001 mfr:0154 prod:0005 model:0001 ver:1.05 zwv:4.38 lib:03 cc:5E,7A,73,5A,98,86,72 sec:30,71,70,59,85,62 role:05 ff:8300 ui:8300
         * Secure Features:
@@ -58,6 +56,7 @@ metadata {
 			}
             tileAttribute ("device.battery", key: "SECONDARY_CONTROL") {
                 attributeState "battery", label:'Battery: ${currentValue}%', unit:""
+                attributeState "mains", label:'Mains Power', unit:""
             }
 		}
     	valueTile("status", "device.lock", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
@@ -68,35 +67,35 @@ metadata {
 			state "default", label:'', action:"refresh.refresh", icon:"st.secondary.refresh"
 		}
 
-		valueTile("lastUpdate", "device.lastUpdate", decoration: "flat", width: 2, height: 2){
-			state "lastUpdate", label:'Settings\nUpdated\n\n${currentValue}', unit:""
-		}
-		
 		main("status")
-		details(["toggle", "battery", "refresh", "lastUpdate"])
+		details(["toggle", "battery", "refresh"])
 	}
     preferences {
         input "lockTimeoutSeconds", "number", title: "Timeout", description: "Lock Timeout in Seconds",
               range: "1..59", displayDuringSetup: false, defaultValue: 1, required: true
-		input "wakeUpInterval", "number",
-			title: "Minimum Check-in Interval [1-167]\n(1 = 1 Hour)\n(167 = 7 Days)",
-			defaultValue: checkinIntervalSetting,
-			range: "1..167",
-			displayDuringSetup: true, 
-			required: false
-		input "batteryReportingInterval", "number",
-			title: "Battery Reporting Interval [1-24]\n(1 Hour - 24 Hours)",
-			defaultValue: batteryReportingIntervalSetting,
-			required: false,
-			displayDuringSetup: true,
-			range: "1..24"
-		input "debugOutput", "bool", 
-			title: "Enable debug logging?", 
-			defaultValue: true, 
-			required: false    }
+		input "debugOutput", "boolean", 
+			title: "Enable debug logging?",
+			defaultValue: false,
+			displayDuringSetup: true
+    }
 }
 
 import physicalgraph.zwave.commands.doorlockv1.*
+import physicalgraph.zwave.commands.usercodev1.*
+
+def updated() {
+	if (state.debug) log.debug "Update"
+    // Set the configuration
+	configure()    
+	// Device-Watch pings if no device events received for 1 hour (checkInterval)
+	sendEvent(name: "checkInterval", value: 24 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
+}
+
+def configure() {
+    def cmds = []
+        cmds << zwave.doorLockV1.doorLockConfigurationSet(insideDoorHandlesState: 0, lockTimeoutMinutes: 0, lockTimeoutSeconds: lockTimeoutSeconds.toInteger(), operationType: 2, outsideDoorHandlesState: 0).format()
+	delayBetween(cmds, 4200)
+}
 
 def parse(String description) {
 	def result = null
@@ -121,282 +120,13 @@ def parse(String description) {
 			result = zwaveEvent(cmd)
 		}
 	}
-	log.debug "\"$description\" parsed to ${result.inspect()}"
+	if (state.debug) log.debug "\"$description\" parsed to ${result.inspect()}"
 	result
-}
-
-def lockAndCheck(doorLockMode) {
-	secureSequence([
-		zwave.doorLockV1.doorLockOperationSet(doorLockMode: doorLockMode),
-     ], 4200)
-}
-
-def lock() {
-	unlockwtimeout()
-//    sendEvent(name: "lock", value: "locked", isStateChange: "true", descriptionText: "The Bell was Rung (lock)" )
-//	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_SECURED)
-}
-
-def unlock() {
-	unlockwtimeout()
-//	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED)
-}
-
-def unlockwtimeout() {
-	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED_WITH_TIMEOUT)
-}
-
-def stateCheck() {
-	log.debug "stateCheck()"
-	sendHubCommand(new physicalgraph.device.HubAction(secure(zwave.doorLockV1.doorLockOperationGet())))
-}
-
-private initializeCheckin() {
-	// Set the Health Check interval so that it can be skipped once plus 2 minutes.
-	def checkInterval = ((checkinIntervalSettingSeconds * 2) + (2 * 60))
-	
-	sendEvent(name: "checkInterval", value: checkInterval, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
-}
-/**
- * PING is used by Device-Watch in attempt to reach the Device
- * Required for HealthCheck Capability, but doesn't actually do anything because this device sleeps.
- * */
-def ping() {
-	logDebug "ping()"	
-	secure(zwave.batteryV1.batteryGet())
-}
-
-// Forces the configuration to be resent to the device the next time it wakes up.
-def refresh() {	
-	logForceWakeupMessage "The sensor data will be refreshed the next time the device wakes up."
-	state.pendingRefresh = true
-}
-
-private logForceWakeupMessage(msg) {
-	logDebug "${msg}  You can force the device to wake up immediately by pressing the connect button once."
-}
-
-/*
-def refresh() {
-	def cmds = [secure(zwave.doorLockV1.doorLockOperationGet())]
-	if (state.assoc == zwaveHubNodeId) {
-		log.debug "$device.displayName is associated to ${state.assoc}"
-	} else if (!state.associationQuery) {
-		log.debug "checking association"
-		cmds << "delay 4200"
-		cmds << zwave.associationV1.associationGet(groupingIdentifier:2).format()  // old Schlage locks use group 2 and don't secure the Association CC
-		cmds << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
-		state.associationQuery = now()
-	} else if (secondsPast(state.associationQuery, 9)) {
-		cmds << "delay 6000"
-		cmds << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
-		cmds << secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId))
-		cmds << zwave.associationV1.associationGet(groupingIdentifier:2).format()
-		cmds << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
-		state.associationQuery = now()
-	}
-	log.debug "refresh sending ${cmds.inspect()}"
-	cmds << zwave.batteryV1.batteryGet().format()
-    cmds << secure(zwave.doorLockV1.doorLockConfigurationSet(insideDoorHandlesState: 0, lockTimeoutMinutes: 0, lockTimeoutSeconds: lockTimeoutSeconds.toInteger(), operationType: 2, outsideDoorHandlesState: 0))
-	cmds
-}
-
-def poll() {
-	log.debug "poll()"
-	def cmds = []
-	// Only check lock state if it changed recently or we haven't had an update in an hour
-	def latest = device.currentState("lock")?.date?.time
-	if (!latest || !secondsPast(latest, 6 * 60) || secondsPast(state.lastPoll, 55 * 60)) {
-		cmds << secure(zwave.doorLockV1.doorLockOperationGet())
-		state.lastPoll = now()
-	} else if (!state.lastbatt || now() - state.lastbatt > 53*60*60*1000) {
-		cmds << secure(zwave.batteryV1.batteryGet())
-		state.lastbatt = now()  //inside-214
-	}
-	if (cmds) {
-		log.debug "poll is sending ${cmds.inspect()}"
-		cmds
-	} else {
-		// workaround to keep polling from stopping due to lack of activity
-		sendEvent(descriptionText: "skipping poll", isStateChange: true, displayed: true)
-		null
-	}
-}
-*/
-
-def updated() {	
-	// This method always gets called twice when preferences are saved.
-	if (!isDuplicateCommand(state.lastUpdated, 3000)) {		
-		state.lastUpdated = new Date().time
-		logTrace "updated()"
-
-		logForceWakeupMessage "The configuration will be updated the next time the device wakes up."
-		state.pendingChanges = true
-	}		
-}
-//def updated() {
-	// Device-Watch: Device wakes up every 1 hour, this interval allows us to miss one wakeup notification before marking offline)
-//	sendEvent(name: "checkInterval", value: 2 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
-    // Set the configuration
-//	configure()    
-//}
-
-def installed() {
-	// Device-Watch: Device wakes up every 1 hour, this interval allows us to miss one wakeup notification before marking offline)
-	sendEvent(name: "checkInterval", value: 2 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
-    // Set the configuration
-//	configure()    
-}
-
-def configure() {
-	logTrace "configure()"
-	def cmds = []
-	def refreshAll = (!state.isConfigured || state.pendingRefresh )
-	
-	if (!state.isConfigured) {
-		logTrace "Waiting 1 second because this is the first time being configured"		
-		sendEvent(getEventMap("lock", "locked", false))		
-		cmds << "delay 1000"
-	}
-	
-	configData.sort { it.paramNum }.each { 
-		cmds += updateConfigVal(it.paramNum, it.value, refreshAll)	
-	}
-	
-	if (refreshAll || canReportBattery()) {
-		cmds << batteryGetCmd()
-	}
-	
-	sendEvent(name: "lastUpdate", value: convertToLocalTimeString(new Date()), displayed: false)
-	
-	initializeCheckin()
-	cmds << wakeUpIntervalSetCmd(checkinIntervalSettingSeconds)
-		
-	if (cmds) {
-		logDebug "Sending configuration to device."
-		return delayBetween(cmds, 1000)
-	}
-	else {
-		return cmds
-	}	
-}
-//def configure() {
-//    def cmds = []
-//        cmds << zwave.doorLockV1.doorLockConfigurationSet(insideDoorHandlesState: 0, lockTimeoutMinutes: 0, lockTimeoutSeconds: lockTimeoutSeconds.toInteger(), operationType: 2, outsideDoorHandlesState: 0).format()
-//	delayBetween(cmds, 4200)
-//}
-
-private updateConfigVal(paramNum, val, refreshAll) {
-	def result = []
-	def configVal = state["configVal${paramNum}"]
-	
-	if (refreshAll || (configVal != val)) {
-		result << configSetCmd(paramNum, val)
-		result << configGetCmd(paramNum)
-	}	
-	return result
-}
-
-private wakeUpIntervalSetCmd(val) {
-	logDebug "wakeUpIntervalSetCmd($val)"
-	return zwave.wakeUpV2.wakeUpIntervalSet(seconds:val, nodeid:zwaveHubNodeId).format()
-}
-
-private wakeUpNoMoreInfoCmd() {
-	return zwave.wakeUpV2.wakeUpNoMoreInformation().format()
-}
-
-private batteryGetCmd() {
-	return zwave.batteryV1.batteryGet().format()
-}
-
-private configGetCmd(paramNum) {
-	return zwave.configurationV1.configurationGet(parameterNumber: paramNum).format()
-}
-
-private configSetCmd(paramNum, val) {
-	return zwave.configurationV1.configurationSet(parameterNumber: paramNum, size: 1, scaledConfigurationValue: val).format()
-}
-
-private secure(physicalgraph.zwave.Command cmd) {
-//	log.debug "CMD: $cmd"
-	zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
-}
-
-private secureSequence(commands, delay=4200) {
-	delayBetween(commands.collect{ secure(it) }, delay)
-}
-
-
-private getCheckinIntervalSetting() {
-	return safeToInt(settings?.wakeUpInterval, 12)
-}
-
-private getCheckinIntervalSettingSeconds() {
-	return (checkinIntervalSetting * 60 * 60)
-}
-
-private getBatteryReportingIntervalSetting() {
-	return safeToInt(settings?.batteryReportingInterval, 12)
-}
-
-private getBatteryReportingIntervalSettingSeconds() {
-	return (batteryReportingIntervalSetting * 60 * 60)
-}
-
-private getDebugOutputSetting() {
-	return (settings?.debugOutput == null) ? true : settings?.debugOutput
-}
-
-private getEventMap(name, value, displayed=null, desc=null, unit=null) {	
-	def isStateChange = (device.currentValue(name) != value)
-	displayed = (displayed == null ? isStateChange : displayed)
-	def eventMap = [
-		name: name,
-		value: value,
-		displayed: displayed,
-		isStateChange: isStateChange
-	]
-	if (desc) {
-		eventMap.descriptionText = desc
-	}
-	if (unit) {
-		eventMap.unit = unit
-	}	
-	logTrace "Creating Event: ${eventMap}"
-	return eventMap
-}
-
-private safeToInt(val, defaultVal=-1) {
-	return "${val}"?.isInteger() ? "${val}".toInteger() : defaultVal
-}
-
-private convertToLocalTimeString(dt) {
-	def timeZoneId = location?.timeZone?.ID
-	if (timeZoneId) {
-		return dt.format("MM/dd/yyyy hh:mm:ss a", TimeZone.getTimeZone(timeZoneId))
-	}
-	else {
-		return "$dt"
-	}	
-}
-
-private isDuplicateCommand(lastExecuted, allowedMil) {
-	!lastExecuted ? false : (lastExecuted + allowedMil > new Date().time) 
-}
-
-private logDebug(msg) {
-	if (debugOutputSetting) {
-		log.debug "$msg"
-	}
-}
-private logTrace(msg) {
-	 log.trace "$msg"
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
 	def encapsulatedCommand = cmd.encapsulatedCommand([0x62: 1, 0x71: 2, 0x80: 1, 0x85: 2, 0x63: 1, 0x98: 1, 0x86: 1])
-	// log.debug "encapsulated: $encapsulatedCommand"
+	if (state.debug) log.debug "encapsulated: $encapsulatedCommand"
 	if (encapsulatedCommand) {
 		zwaveEvent(encapsulatedCommand)
 	}
@@ -421,7 +151,7 @@ def zwaveEvent(DoorLockOperationReport cmd) {
 	} else {
 		map.value = "unlocked"
 		if (state.assoc != zwaveHubNodeId) {
-			log.debug "setting association"
+			if (state.debug) log.debug "setting association"
 			result << response(secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId)))
 			result << response(zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId))
 			result << response(secure(zwave.associationV1.associationGet(groupingIdentifier:1)))
@@ -432,11 +162,11 @@ def zwaveEvent(DoorLockOperationReport cmd) {
 
 
 def zwaveEvent(physicalgraph.zwave.commands.associationv2.AssociationReport cmd) {
-	log.debug "AssociationReport"
+	if (state.debug) log.debug "AssociationReport"
 	def result = []
 	if (cmd.nodeId.any { it == zwaveHubNodeId }) {
 		state.remove("associationQuery")
-		log.debug "$device.displayName is associated to $zwaveHubNodeId"
+		if (state.debug) log.debug "$device.displayName is associated to $zwaveHubNodeId"
 		result << createEvent(descriptionText: "$device.displayName is associated")
 		state.assoc = zwaveHubNodeId
 		if (cmd.groupingIdentifier == 2) {
@@ -451,7 +181,7 @@ def zwaveEvent(physicalgraph.zwave.commands.associationv2.AssociationReport cmd)
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.basicv1.BasicSet cmd) {
-	log.debug "Basic Set ${cmd}"
+	if (state.debug) log.debug "Basic Set ${cmd}"
 
 	def result = [ createEvent(name: "lock", value: cmd.value ? "unlocked" : "locked") ]
 	def cmds = [
@@ -460,26 +190,7 @@ def zwaveEvent(physicalgraph.zwave.commands.basicv1.BasicSet cmd) {
 			zwave.associationV1.associationGet(groupingIdentifier:2).format()
 	]
 	[result, response(cmds)]
-	log.debug "BasicSet parsed to ${result.inspect()}"
-}
-
-
-def zwaveEvent(physicalgraph.zwave.commands.configurationv1.ConfigurationReport cmd) {	
-	def name = configData.find { it.paramNum == cmd.parameterNumber }?.name
-	if (name) {	
-		def val = cmd.configurationValue[0]
-	
-		logDebug "${name} = ${val}"
-	
-		state."configVal${cmd.parameterNumber}" = val
-	}
-	else {
-		logDebug "Parameter ${cmd.parameterNumber}: ${cmd.configurationValue}"
-	}
-	state.isConfigured = true
-	state.pendingRefresh = false	
-	state.pendingChanges = false
-	return []
+	if (state.debug) log.debug "BasicSet parsed to ${result.inspect()}"
 }
 
 // Battery powered devices can be configured to periodically wake up and
@@ -488,11 +199,11 @@ def zwaveEvent(physicalgraph.zwave.commands.configurationv1.ConfigurationReport 
 // instructs them that there are no more commands to receive and they can
 // stop listening.
 def zwaveEvent(physicalgraph.zwave.commands.wakeupv2.WakeUpNotification cmd) {
-	log.debug "WakeUpNotification"
+		if (state.debug) log.debug "WakeUpNotification"
         def result = [createEvent(descriptionText: "${device.displayName} woke up", isStateChange: false)]
 
         // Only ask for battery if we haven't had a BatteryReport in a while
-        if (!state.lastbatt || (new Date().time) - state.lastbatt > 2*60*60*1000) {
+        if (!state.lastbatt || (new Date().time) - state.lastbatt > 24*60*60*1000) {
                 result << response(zwave.batteryV1.batteryGet())
                 result << response("delay 1200")  // leave time for device to respond to batteryGet
         }
@@ -501,7 +212,7 @@ def zwaveEvent(physicalgraph.zwave.commands.wakeupv2.WakeUpNotification cmd) {
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
-	log.debug "BatteryReport"
+	if (state.debug) log.debug "BatteryReport"
 	def map = [ name: "battery", unit: "%" ]
 	if (cmd.batteryLevel == 0xFF) {
 		map.value = 1
@@ -514,11 +225,11 @@ def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.manufacturerspecificv2.ManufacturerSpecificReport cmd) {
-	log.debug "ManufacturerSpecificReport"
+	if (state.debug) log.debug "ManufacturerSpecificReport"
 	def result = []
 
 	def msr = String.format("%04X-%04X-%04X", cmd.manufacturerId, cmd.productTypeId, cmd.productId)
-	log.debug "msr: $msr"
+	if (state.debug) log.debug "msr: $msr"
 	updateDataValue("MSR", msr)
 
 	result << createEvent(descriptionText: "$device.displayName MSR: $msr", isStateChange: false)
@@ -526,7 +237,7 @@ def zwaveEvent(physicalgraph.zwave.commands.manufacturerspecificv2.ManufacturerS
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.versionv1.VersionReport cmd) {
-	log.debug "VersionReport"
+	if (state.debug) log.debug "VersionReport"
 	def fw = "${cmd.applicationVersion}.${cmd.applicationSubVersion}"
 	updateDataValue("fw", fw)
 	if (state.MSR == "003B-6341-5044") {
@@ -537,7 +248,87 @@ def zwaveEvent(physicalgraph.zwave.commands.versionv1.VersionReport cmd) {
 }
 
 def zwaveEvent(physicalgraph.zwave.Command cmd) {
-	logDebug "Unhandled Command: $cmd"
+	if (state.debug) log.debug "Command"
 	createEvent(displayed: false, descriptionText: "$device.displayName: $cmd")
-	return []
+}
+
+def lockAndCheck(doorLockMode) {
+	secureSequence([
+		zwave.doorLockV1.doorLockOperationSet(doorLockMode: doorLockMode),
+     ], 4200)
+}
+
+def lock() {
+	unlockwtimeout()
+//    sendEvent(name: "lock", value: "locked", isStateChange: "true", descriptionText: "The Bell was Rung (lock)" )
+//	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_SECURED)
+}
+
+def unlock() {
+	unlockwtimeout()
+//	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED)
+}
+
+def unlockwtimeout() {
+	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED_WITH_TIMEOUT)
+}
+
+def stateCheck() {
+	if (state.debug) log.debug "stateCheck()"
+	sendHubCommand(new physicalgraph.device.HubAction(secure(zwave.doorLockV1.doorLockOperationGet())))
+}
+
+def refresh() {
+	def cmds = [secure(zwave.doorLockV1.doorLockOperationGet())]
+	if (state.assoc == zwaveHubNodeId) {
+		if (state.debug) log.debug "$device.displayName is associated to ${state.assoc}"
+	} else if (!state.associationQuery) {
+		if (state.debug) log.debug "checking association"
+		cmds << "delay 4200"
+		cmds << zwave.associationV1.associationGet(groupingIdentifier:2).format()  // old Schlage locks use group 2 and don't secure the Association CC
+		cmds << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
+		state.associationQuery = now()
+	} else if (secondsPast(state.associationQuery, 9)) {
+		cmds << "delay 6000"
+		cmds << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
+		cmds << secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId))
+		cmds << zwave.associationV1.associationGet(groupingIdentifier:2).format()
+		cmds << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
+		state.associationQuery = now()
+	}
+	if (state.debug) log.debug "refresh sending ${cmds.inspect()}"
+	cmds << zwave.batteryV1.batteryGet().format()
+    cmds << secure(zwave.doorLockV1.doorLockConfigurationSet(insideDoorHandlesState: 0, lockTimeoutMinutes: 0, lockTimeoutSeconds: lockTimeoutSeconds.toInteger(), operationType: 2, outsideDoorHandlesState: 0))
+	cmds
+}
+
+def poll() {
+	if (state.debug) log.debug "poll()"
+	def cmds = []
+	// Only check lock state if it changed recently or we haven't had an update in an hour
+	def latest = device.currentState("lock")?.date?.time
+	if (!latest || !secondsPast(latest, 6 * 60) || secondsPast(state.lastPoll, 55 * 60)) {
+		cmds << secure(zwave.doorLockV1.doorLockOperationGet())
+		state.lastPoll = now()
+	} else if (!state.lastbatt || now() - state.lastbatt > 53*60*60*1000) {
+		cmds << secure(zwave.batteryV1.batteryGet())
+		state.lastbatt = now()  //inside-214
+	}
+	if (cmds) {
+		if (state.debug) log.debug "poll is sending ${cmds.inspect()}"
+		cmds
+	} else {
+		// workaround to keep polling from stopping due to lack of activity
+		sendEvent(descriptionText: "skipping poll", isStateChange: true, displayed: false)
+		null
+	}
+}
+
+private secure(physicalgraph.zwave.Command cmd) {
+	if (state.debug) log.debug "CMD: $cmd"
+	zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
+}
+
+private secureSequence(commands, delay=4200) {
+	delayBetween(commands.collect{ secure(it) }, delay)
 }
