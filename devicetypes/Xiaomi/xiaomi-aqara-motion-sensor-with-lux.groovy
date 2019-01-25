@@ -76,7 +76,7 @@ metadata {
             value:120, 
             displayDuringSetup: false
 		input "debugOutput", "boolean", 
-			title: "Enable debug logging?",
+			title: "Enable debug logging",
 			defaultValue: false,
 			displayDuringSetup: true
 	}
