@@ -30,7 +30,7 @@
  */
 
 metadata {
-	definition (name: "Xiaomi Aqara Motion Sensor", namespace: "johndoyle", author: "John Doyle") {
+	definition (name: "Xiaomi Aqara Motion Sensor With Lux", namespace: "johndoyle", author: "John Doyle") {
 		capability "Motion Sensor"
 		capability "Configuration"
 		capability "Battery"
