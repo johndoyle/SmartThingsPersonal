@@ -11,7 +11,7 @@
  *
  */
 metadata {
-	definition (name: "Z-Wave Popp Electronic Door Opener Control Module", namespace: "johndoyle", author: "John Doyle") {
+	definition (name: "Popp Electronic Door Opener Control Module", namespace: "johndoyle", author: "John Doyle") {
 		capability "Actuator"
 		capability "Lock"
 		capability "Refresh"
