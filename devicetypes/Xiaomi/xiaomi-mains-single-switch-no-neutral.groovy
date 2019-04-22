@@ -9,6 +9,8 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
+ *  
+ *  20190422 - Updates Based on feedback from battikh - Thanks
  */
 
 metadata {
@@ -21,6 +23,8 @@ metadata {
         capability "Temperature Measurement"
 
 		fingerprint profileId: "0104", inClusters: "0000, 0002, 0006"
+		fingerprint profileId:"0104", deviceId:"5C23", manufacturer:"LUMI", model:"lumi.ctrl_neutral1"
+
 	}
 
     // simulator metadata
@@ -147,6 +151,14 @@ private Map parseReportAttributeMessage(String description) {
     	if (state.debug) log.info "Reported Temp of " + temp + "°" + getTemperatureScale()
 		resultMap = createEvent(name: "temperature", value: zigbee.parseHATemperatureValue("temperature: " + temp, "temperature: ", getTemperatureScale()), unit: getTemperatureScale())
 	}
+    else if (descMap.cluster == "0006" && descMap.endpoint == "02" && descMap.value[15] == "0") {
+    	if (state.debug) log.info "Reported Switch Off"
+    	resultMap = createEvent(name: "switch", value: "off")
+    } 
+    else if (descMap.cluster == "0006" && descMap.endpoint == "02" &&  descMap.value[15] == "1") {
+    	if (state.debug) log.info "Reported Switch On"
+    	resultMap = createEvent(name: "switch", value: "on")
+    } 
     else if (descMap.cluster == "0008" && descMap.attrId == "0000") {
     	if (state.debug) log.info "Reported Switch Off"
     	resultMap = createEvent(name: "switch", value: "off")
@@ -173,13 +185,13 @@ private isDuplicateCommand(lastExecuted, allowedMil) {
 def off() {
 	if (device.endpointId == null) device.endpointId = 2
    	if (state.debug) log.info "Off()"
-    zigbee.off()
+    "st cmd 0x${device.deviceNetworkId} 2 6 0 {}"
 }
 
 def on() {
 	if (device.endpointId == null) device.endpointId = 2
    	if (state.debug) log.info "On()"
-    zigbee.on()
+    "st cmd 0x${device.deviceNetworkId} 2 6 1 {}"
 }
 
 /**
