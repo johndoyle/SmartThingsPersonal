@@ -14,7 +14,7 @@
  */
 
 metadata {
-	definition (name: "Xiaomi Zigbee Mains Toggle Switch", namespace: "johndoyle", author: "John Doyle") {
+	definition (name: "Xiaomi Mains Single Switch No Neutral", namespace: "johndoyle", author: "John Doyle") {
         capability "Actuator"
         capability "Configuration"
         capability "Refresh"
